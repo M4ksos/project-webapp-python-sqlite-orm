@@ -1,0 +1,434 @@
+{% extends 'base.html' %}
+{% block title %}Администрирование — SAS{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1>Администрирование</h1>
+    <div class="sub">Управление пользователями, студентами, расписанием</div>
+  </div>
+</div>
+
+{% set pending = users|selectattr('approved', 'equalto', false)|list %}
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="showTab('users')">
+    Пользователи ({{ users|length }})
+    {% if pending|length > 0 %}
+    <span style="background:var(--red);color:#fff;border-radius:10px;padding:1px 7px;font-size:11px;margin-left:4px">
+      {{ pending|length }}
+    </span>
+    {% endif %}
+  </button>
+  <button class="tab-btn" onclick="showTab('students')">Студенты ({{ students|length }})</button>
+  <button class="tab-btn" onclick="showTab('groups')">Группы ({{ groups|length }})</button>
+  <button class="tab-btn" onclick="showTab('subjects')">Предметы ({{ subjects|length }})</button>
+  <button class="tab-btn" onclick="showTab('lectures')">Лекции ({{ lectures|length }})</button>
+</div>
+
+{# ══════════ TAB: ПОЛЬЗОВАТЕЛИ ══════════ #}
+<div id="tab-users" class="tab-content">
+
+  {% if pending %}
+  <div class="section">
+    <div class="section-header">
+      <h2 style="color:var(--amber)">⚠ Ожидают подтверждения ({{ pending|length }})</h2>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table>
+        <thead>
+          <tr><th>ФИО</th><th>Логин</th><th>Роль</th><th>Действия</th></tr>
+        </thead>
+        <tbody>
+          {% for u in pending %}
+          <tr>
+            <td style="font-weight:600">{{ u.full_name }}</td>
+            <td class="mono">{{ u.username }}</td>
+            <td><span class="role-badge {{ u.role }}">{{ u.role }}</span></td>
+            <td>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                {# Подтвердить #}
+                <form method="POST" action="{{ url_for('approve_user', uid=u.id) }}">
+                  <button class="btn btn-success btn-sm">✓ Подтвердить</button>
+                </form>
+                {# Изменить роль и подтвердить #}
+                <form method="POST" action="{{ url_for('change_role', uid=u.id) }}" style="display:flex;gap:4px">
+                  <select name="role" style="min-width:120px;padding:5px 8px;font-size:13px">
+                    <option value="student"  {{ 'selected' if u.role=='student' }}>student</option>
+                    <option value="teacher"  {{ 'selected' if u.role=='teacher' }}>teacher</option>
+                    <option value="admin"    {{ 'selected' if u.role=='admin'   }}>admin</option>
+                  </select>
+                  <button class="btn btn-ghost btn-sm">Сменить роль</button>
+                </form>
+                {# Удалить #}
+                <form method="POST" action="{{ url_for('delete_user', uid=u.id) }}"
+                      onsubmit="return confirm('Удалить пользователя {{ u.full_name }}?')">
+                  <button class="btn btn-danger btn-sm">Удалить</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="section">
+    <div class="section-header"><h2>Все пользователи</h2></div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <table>
+        <thead>
+          <tr><th>ФИО</th><th>Логин</th><th>Роль</th><th>Статус</th><th>Привязан к студенту</th><th>Действия</th></tr>
+        </thead>
+        <tbody>
+          {% for u in users if u.approved %}
+          <tr>
+            <td style="font-weight:600">{{ u.full_name }}</td>
+            <td class="mono">{{ u.username }}</td>
+            <td>
+              <form method="POST" action="{{ url_for('change_role', uid=u.id) }}"
+                    style="display:flex;gap:6px;align-items:center">
+                <select name="role" style="min-width:110px;padding:4px 8px;font-size:13px"
+                        {{ 'disabled' if u.id == current_user.id else '' }}>
+                  <option value="student" {{ 'selected' if u.role=='student' }}>student</option>
+                  <option value="teacher" {{ 'selected' if u.role=='teacher' }}>teacher</option>
+                  <option value="admin"   {{ 'selected' if u.role=='admin'   }}>admin</option>
+                </select>
+                {% if u.id != current_user.id %}
+                <button class="btn btn-ghost btn-sm">↺</button>
+                {% endif %}
+              </form>
+            </td>
+            <td>
+              {% if u.approved %}
+                <span class="pill pill-green">активен</span>
+              {% else %}
+                <span class="pill pill-amber">ожидает</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if u.student_record %}
+                <span style="font-size:13px">{{ u.student_record.full_name }}</span><br>
+                <span class="mono" style="font-size:11px;color:var(--muted)">{{ u.student_record.student_number }}</span>
+              {% elif u.role == 'student' %}
+                {# Форма привязки #}
+                <form method="POST" action="{{ url_for('link_student', uid=u.id) }}"
+                      style="display:flex;gap:6px">
+                  <select name="student_id" style="min-width:160px;padding:4px 8px;font-size:12px">
+                    <option value="">— выбрать —</option>
+                    {% for s in students if s.active and not s.user %}
+                    <option value="{{ s.id }}">{{ s.full_name }} ({{ s.student_number }})</option>
+                    {% endfor %}
+                  </select>
+                  <button class="btn btn-ghost btn-sm">Привязать</button>
+                </form>
+              {% else %}
+                <span style="color:var(--muted);font-size:13px">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if u.id != current_user.id %}
+              <form method="POST" action="{{ url_for('delete_user', uid=u.id) }}"
+                    onsubmit="return confirm('Удалить пользователя {{ u.full_name }}?')">
+                <button class="btn btn-danger btn-sm">Удалить</button>
+              </form>
+              {% else %}
+              <span style="font-size:12px;color:var(--muted)">это вы</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{# ══════════ TAB: СТУДЕНТЫ ══════════ #}
+<div id="tab-students" class="tab-content" style="display:none">
+  <div class="section">
+    <div class="section-header"><h2>Добавить студента</h2></div>
+    <div class="card">
+      <form method="POST" action="{{ url_for('add_student') }}">
+        <div class="form-row">
+          <div class="form-group">
+            <label>ФИО</label>
+            <input type="text" name="full_name" placeholder="Иванов Иван Иванович" required style="min-width:240px">
+          </div>
+          <div class="form-group">
+            <label>Номер зачётки</label>
+            <input type="text" name="student_number" placeholder="2021001" required style="min-width:130px">
+          </div>
+          <div class="form-group">
+            <label>UID карты (RFID)</label>
+            <input type="text" name="rfid_uid" placeholder="AA:BB:CC:01" required
+                   style="min-width:150px;font-family:var(--mono)">
+          </div>
+          <div class="form-group">
+            <label>Группа</label>
+            <select name="group_id" required>
+              <option value="">— выбрать —</option>
+              {% for g in groups %}
+              <option value="{{ g.id }}">{{ g.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary" style="align-self:flex-end">Добавить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="card" style="padding:0;overflow:hidden">
+      {% if students %}
+      <table>
+        <thead>
+          <tr><th>ФИО</th><th>Зачётка</th><th>Группа</th><th>UID карты</th><th>Аккаунт</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for s in students %}
+          <tr>
+            <td style="font-weight:600">{{ s.full_name }}</td>
+            <td class="mono">{{ s.student_number }}</td>
+
+            {# Группа — выпадающий список прямо в ячейке #}
+            <td>
+              <form method="POST" action="{{ url_for('change_student_group', sid=s.id) }}"
+                    style="display:flex;gap:6px;align-items:center">
+                <select name="group_id"
+                        style="padding:4px 8px;font-size:12px;min-width:100px"
+                        onchange="this.form.submit()">
+                  {% for g in groups %}
+                  <option value="{{ g.id }}"
+                          {{ 'selected' if g.id == s.group_id else '' }}>
+                    {{ g.name }}
+                  </option>
+                  {% endfor %}
+                </select>
+              </form>
+            </td>
+
+            <td class="mono" style="font-size:12px;color:var(--muted)">{{ s.rfid_uid }}</td>
+            <td style="font-size:13px">
+              {% if s.user %}
+                <span style="color:var(--green)">{{ s.user.username }}</span>
+              {% else %}
+                <span style="color:var(--muted)">не привязан</span>
+              {% endif %}
+            </td>
+            <td style="display:flex;gap:6px">
+              <a href="{{ url_for('student_profile', sid=s.id) }}"
+                class="btn btn-ghost btn-sm">Профиль →</a>
+              <form method="POST" action="{{ url_for('delete_student', sid=s.id) }}"
+                    onsubmit="return confirm('Удалить студента {{ s.full_name }}? Это действие необратимо.')">
+                <button class="btn btn-danger btn-sm">Удалить</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">Студентов нет</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# ══════════ TAB: ГРУППЫ ══════════ #}
+<div id="tab-groups" class="tab-content" style="display:none">
+  <div class="section">
+    <div class="section-header"><h2>Добавить группу</h2></div>
+    <div class="card">
+      <form method="POST" action="{{ url_for('add_group') }}">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Название</label>
+            <input type="text" name="name" placeholder="ИВТ-21" required>
+          </div>
+          <button type="submit" class="btn btn-primary" style="align-self:flex-end">Создать</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="section">
+    <div class="card" style="padding:0;overflow:hidden">
+      {% if groups %}
+      <table>
+        <thead>
+  <tr><th>Название</th><th>Студентов</th><th>Лекций</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for g in groups %}
+          <tr>
+            <td style="font-weight:600">{{ g.name }}</td>
+            <td>{{ g.students|selectattr('active')|list|length }}</td>
+            <td>{{ g.lectures|length }}</td>
+            <td>
+              <form method="POST" action="{{ url_for('delete_group', gid=g.id) }}"
+                    onsubmit="return confirm('Удалить группу «{{ g.name }}»?')">
+                <button class="btn btn-danger btn-sm">Удалить</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">Групп нет</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# ══════════ TAB: ПРЕДМЕТЫ ══════════ #}
+<div id="tab-subjects" class="tab-content" style="display:none">
+  <div class="section">
+    <div class="section-header"><h2>Добавить предмет</h2></div>
+    <div class="card">
+      <form method="POST" action="{{ url_for('add_subject') }}">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Название предмета</label>
+            <input type="text" name="name" placeholder="Базы данных" required style="min-width:240px">
+          </div>
+          <div class="form-group">
+            <label>Преподаватель</label>
+            <select name="teacher_id">
+              <option value="">— не назначен —</option>
+              {% for t in teachers %}
+              <option value="{{ t.id }}">{{ t.full_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary" style="align-self:flex-end">Добавить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+  <div class="section">
+    <div class="card" style="padding:0;overflow:hidden">
+      {% if subjects %}
+      <table>
+        <thead><tr><th>Предмет</th><th>Преподаватель</th><th>Лекций</th><th></th></tr></thead>
+        <tbody>
+          {% for s in subjects %}
+          <tr>
+            <td style="font-weight:600">{{ s.name }}</td>
+            <td style="font-size:13px">{{ s.teacher.full_name if s.teacher else '—' }}</td>
+            <td>{{ s.lectures|length }}</td>
+            <td>
+              <form method="POST" action="{{ url_for('delete_subject', sid=s.id) }}"
+                    onsubmit="return confirm('Удалить предмет «{{ s.name }}»?')">
+                <button class="btn btn-danger btn-sm">Удалить</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">Предметов нет</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# ══════════ TAB: ЛЕКЦИИ ══════════ #}
+<div id="tab-lectures" class="tab-content" style="display:none">
+  <div class="section">
+    <div class="section-header"><h2>Создать лекцию</h2></div>
+    <div class="card">
+      <form method="POST" action="{{ url_for('add_lecture') }}">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Предмет</label>
+            <select name="subject_id" required>
+              <option value="">— выбрать —</option>
+              {% for s in subjects %}
+              <option value="{{ s.id }}">{{ s.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Группа</label>
+            <select name="group_id" required>
+              <option value="">— выбрать —</option>
+              {% for g in groups %}
+              <option value="{{ g.id }}">{{ g.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+            <div class="form-group">
+              <label>Дата</label>
+              <input type="date" name="date" required style="min-width:160px">
+            </div>
+            <div class="form-group">
+              <label>Время начала</label>
+              <input type="time" name="time" required style="min-width:120px">
+            </div>
+          <div class="form-group">
+            <label>Аудитория</label>
+            <input type="text" name="room" placeholder="302" style="min-width:100px">
+          </div>
+          <button type="submit" class="btn btn-primary" style="align-self:flex-end">Создать</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="card" style="padding:0;overflow:hidden">
+      {% if lectures %}
+      <table>
+        <thead>
+          <tr><th>Дата</th><th>Предмет</th><th>Группа</th><th>Ауд.</th><th>Явка</th><th>Статус</th><th></th></tr>
+        </thead>
+        <tbody>
+          {% for lec in lectures %}
+          {% set total = lec.group.students|selectattr('active')|list|length %}
+          <tr>
+            <td class="mono" style="font-size:13px">{{ lec.date.strftime('%d.%m.%Y %H:%M') }}</td>
+            <td>{{ lec.subject.name }}</td>
+            <td><span class="pill pill-blue">{{ lec.group.name }}</span></td>
+            <td class="mono">{{ lec.room or '—' }}</td>
+            <td class="mono" style="font-size:13px">{{ lec.attended_count() }}/{{ total }}</td>
+            <td>
+              {% if lec.is_open %}
+                <span class="pill pill-green">● открыта</span>
+              {% else %}
+                <span class="pill pill-muted">закрыта</span>
+              {% endif %}
+            </td>
+            <td style="display:flex;gap:6px">
+              <a href="{{ url_for('lecture_detail', lecture_id=lec.id) }}" class="btn btn-ghost btn-sm">Детали</a>
+              <form method="POST" action="{{ url_for('toggle_lecture', lid=lec.id) }}">
+                <button class="btn btn-ghost btn-sm">{{ 'Закрыть' if lec.is_open else 'Открыть' }}</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">Лекций нет</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).style.display = 'block';
+  event.currentTarget.classList.add('active');
+}
+</script>
+{% endblock %}

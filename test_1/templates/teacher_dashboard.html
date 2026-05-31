@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+{% block title %}Система учёта посещаемости{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1>Мои лекции</h1>
+    <div class="sub">Управление посещаемостью</div>
+  </div>
+</div>
+
+<div class="stat-grid section">
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--accent)">{{ lectures|length }}</div>
+    <div class="stat-label">Всего лекций</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--green)">{{ lectures|selectattr('is_open')|list|length }}</div>
+    <div class="stat-label">Открыто сейчас</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--text)">{{ groups|length }}</div>
+    <div class="stat-label">Групп</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--amber)">{{ subjects|length }}</div>
+    <div class="stat-label">Предметов</div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="card" style="padding:0; overflow:hidden;">
+    {% if lectures %}
+    <table>
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Предмет</th>
+          <th>Группа</th>
+          <th>Ауд.</th>
+          <th>Посещаемость</th>
+          <th>Статус</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for lec in lectures %}
+          {% set total    = lec.group.students|selectattr('active')|list|length %}
+          {% set attended = lec.attended_count() %}
+          {% set pct      = ((attended / total * 100)|int) if total > 0 else 0 %}
+          {% if pct >= 70 %}{% set bar = 'green' %}
+          {% elif pct < 40 %}{% set bar = 'red' %}
+          {% else %}{% set bar = '' %}{% endif %}
+        <tr>
+          <td>
+            <span class="mono">{{ lec.date.strftime('%d.%m.%Y') }}</span><br>
+            <span style="font-size:12px;color:var(--muted)">{{ lec.date.strftime('%H:%M') }}</span>
+          </td>
+          <td style="font-weight:600">{{ lec.subject.name }}</td>
+          <td><span class="pill pill-blue">{{ lec.group.name }}</span></td>
+          <td class="mono">{{ lec.room or '—' }}</td>
+          <td style="min-width:160px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div class="progress" style="flex:1">
+                <div class="progress-fill {{ bar }}" style="width:{{ pct }}%"></div>
+              </div>
+              <span class="mono" style="font-size:12px;color:var(--muted);white-space:nowrap">
+                {{ attended }}/{{ total }}
+              </span>
+            </div>
+          </td>
+          <td>
+            {% if lec.is_open %}
+              <span class="pill pill-green">● открыта</span>
+            {% else %}
+              <span class="pill pill-muted">закрыта</span>
+            {% endif %}
+          </td>
+          <td>
+            <a href="{{ url_for('lecture_detail', lecture_id=lec.id) }}"
+               class="btn btn-ghost btn-sm">Открыть →</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">Лекций пока нет. Администратор должен создать их в панели управления.</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

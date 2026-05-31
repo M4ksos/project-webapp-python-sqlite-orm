@@ -1,0 +1,170 @@
+{% extends 'base.html' %}
+{% block title %}{{ student.full_name }} — профиль{% endblock %}
+
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1>{{ student.full_name }}</h1>
+    <div class="sub">
+      {{ student.group.name }} · зачётка {{ student.student_number }}
+      {% if student.user %}
+        · аккаунт <span class="mono" style="color:var(--green)">{{ student.user.username }}</span>
+      {% else %}
+        · <span style="color:var(--muted)">аккаунт не привязан</span>
+      {% endif %}
+    </div>
+  </div>
+  <div style="display:flex;gap:10px">
+    <a href="{{ url_for('admin_panel') }}" class="btn btn-ghost">← Назад</a>
+    <form method="POST"
+          action="{{ url_for('delete_group', gid=student.group_id) }}"
+          onsubmit="return confirm('Удалить группу «{{ student.group.name }}»? Это невозможно если в ней есть студенты.')">
+      <button class="btn btn-danger">Удалить группу {{ student.group.name }}</button>
+    </form>
+  </div>
+</div>
+
+{# ── Статистика ── #}
+<div class="stat-grid section">
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--accent)">{{ total }}</div>
+    <div class="stat-label">Всего занятий</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--green)">{{ attended }}</div>
+    <div class="stat-label">Посещено</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--red)">{{ absent }}</div>
+    <div class="stat-label">Пропусков</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--muted)">{{ unmarked }}</div>
+    <div class="stat-label">Не отмечено</div>
+  </div>
+  <div class="stat-card">
+    {% if pct >= 70 %}{% set pct_color = 'var(--green)' %}
+    {% elif pct >= 40 %}{% set pct_color = 'var(--amber)' %}
+    {% else %}{% set pct_color = 'var(--red)' %}{% endif %}
+    <div class="stat-val" style="color:{{ pct_color }}">{{ pct }}%</div>
+    <div class="stat-label">Посещаемость</div>
+  </div>
+</div>
+
+{# ── Прогресс-бар ── #}
+{% if pct >= 70 %}{% set bar = 'green' %}
+{% elif pct < 40 %}{% set bar = 'red' %}
+{% else %}{% set bar = '' %}{% endif %}
+<div class="progress section" style="height:10px;border-radius:5px;margin-top:-20px;margin-bottom:32px">
+  <div class="progress-fill {{ bar }}" style="width:{{ pct }}%"></div>
+</div>
+
+
+
+{# ── Таблица по предметам ── #}
+{% set subjects_seen = [] %}
+{% for lec in lectures %}
+  {% if lec.subject.id not in subjects_seen %}
+    {% set _ = subjects_seen.append(lec.subject.id) %}
+  {% endif %}
+{% endfor %}
+
+{% if subjects_seen|length > 1 %}
+<div class="section">
+  <div class="section-header"><h2>По предметам</h2></div>
+  <div class="card" style="padding:0;overflow:hidden">
+    <table>
+      <thead>
+        <tr><th>Предмет</th><th>Занятий</th><th>Посещено</th><th>Пропусков</th><th>%</th></tr>
+      </thead>
+      <tbody>
+        {% for subj_id in subjects_seen %}
+          {% set subj_lectures = lectures|selectattr('subject_id','equalto',subj_id)|list %}
+          {% set subj_attended = [] %}
+          {% set subj_absent   = [] %}
+          {% for l in subj_lectures %}
+            {% set rec = att_map.get(l.id) %}
+            {% if rec and rec.source != 'absent' %}{% set _ = subj_attended.append(1) %}{% endif %}
+            {% if rec and rec.source == 'absent' %}{% set _ = subj_absent.append(1) %}{% endif %}
+          {% endfor %}
+          {% set subj_total = subj_lectures|length %}
+          {% set subj_pct   = ((subj_attended|length / subj_total * 100)|int) if subj_total > 0 else 0 %}
+          {% if subj_pct >= 70 %}{% set sc = 'var(--green)' %}
+          {% elif subj_pct >= 40 %}{% set sc = 'var(--amber)' %}
+          {% else %}{% set sc = 'var(--red)' %}{% endif %}
+        <tr>
+          <td style="font-weight:600">{{ subj_lectures[0].subject.name }}</td>
+          <td class="mono">{{ subj_total }}</td>
+          <td class="mono" style="color:var(--green)">{{ subj_attended|length }}</td>
+          <td class="mono" style="color:var(--red)">{{ subj_absent|length }}</td>
+          <td>
+            <span style="font-family:var(--mono);font-weight:700;color:{{ sc }}">{{ subj_pct }}%</span>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{# ── Подробная таблица по занятиям ── #}
+<div class="section">
+  <div class="section-header"><h2>История занятий</h2></div>
+  <div class="card" style="padding:0;overflow:hidden">
+    {% if lectures %}
+    <table>
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Предмет</th>
+          <th>Аудитория</th>
+          <th>Статус посещения</th>
+          <th>Источник</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for lec in lectures %}
+          {% set rec = att_map.get(lec.id) %}
+        <tr>
+          <td>
+            <span class="mono">{{ lec.date.strftime('%d.%m.%Y') }}</span><br>
+            <span style="font-size:12px;color:var(--muted)">{{ lec.date.strftime('%H:%M') }}</span>
+          </td>
+          <td style="font-weight:600">{{ lec.subject.name }}</td>
+          <td class="mono">{{ lec.room or '—' }}</td>
+          <td>
+            {% if rec %}
+              {% if rec.source == 'absent' %}
+                <span class="pill pill-red">✕ пропуск</span>
+              {% else %}
+                <span class="pill pill-green">✓ присутствовал</span>
+              {% endif %}
+            {% elif not lec.is_open and lec.date < now %}
+              <span class="pill pill-muted">не отмечено</span>
+            {% else %}
+              <span class="pill pill-blue">предстоит</span>
+            {% endif %}
+          </td>
+          <td style="font-size:13px;color:var(--muted)">
+            {% if rec %}
+              {% if rec.source == 'manual' %}вручную
+              {% elif rec.source == 'absent' %}вручную
+              {% elif rec.source == 'rfid' %}RFID
+              {% else %}{{ rec.source }}{% endif %}
+              <br>
+              <span class="mono" style="font-size:11px">{{ rec.timestamp.strftime('%H:%M') }}</span>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">Занятий для этой группы ещё нет</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

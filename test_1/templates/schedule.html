@@ -1,0 +1,129 @@
+{% extends 'base.html' %}
+{% block title %}Расписание — SAS{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1>Расписание</h1>
+      <div class="sub">
+      {% if current_user.is_admin() %}
+        Все лекции системы
+      {% elif current_user.is_teacher() %}
+        Мои дисциплины · {{ lectures|length }} занятий
+      {% elif student_record %}
+        {{ student_record.full_name }} · {{ student_record.group.name }}
+      {% else %}
+        Аккаунт не привязан к записи студента
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% if current_user.is_student() and not student_record %}
+{# Студент зарегистрирован, но не привязан к записи #}
+<div class="card" style="text-align:center;padding:40px">
+  <div style="font-size:36px;margin-bottom:16px">🔗</div>
+  <h2 style="margin-bottom:10px">Аккаунт не привязан</h2>
+  <p style="color:var(--muted);font-size:14px;max-width:400px;margin:0 auto">
+    Ваш аккаунт ещё не привязан к записи студента в системе.
+    Обратитесь к администратору — он установит связь вручную.
+  </p>
+</div>
+
+{% else %}
+
+{# Статистика для студента #}
+{% if student_record %}
+{% set total_lec   = lectures|length %}
+{% set attended_ct = attendance_ids|length %}
+{% set pct = ((attended_ct / total_lec * 100)|int) if total_lec > 0 else 0 %}
+{% if pct >= 70 %}{% set bar = 'green' %}{% elif pct < 40 %}{% set bar = 'red' %}{% else %}{% set bar = '' %}{% endif %}
+
+<div class="stat-grid section">
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--accent)">{{ total_lec }}</div>
+    <div class="stat-label">Лекций всего</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--green)">{{ attended_ct }}</div>
+    <div class="stat-label">Я посетил</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--red)">{{ total_lec - attended_ct }}</div>
+    <div class="stat-label">Пропущено</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:{% if pct >= 70 %}var(--green){% elif pct < 40 %}var(--red){% else %}var(--amber){% endif %}">
+      {{ pct }}%
+    </div>
+    <div class="stat-label">Посещаемость</div>
+  </div>
+</div>
+<div class="progress section" style="height:8px;border-radius:4px;margin-top:-20px;margin-bottom:28px">
+  <div class="progress-fill {{ bar }}" style="width:{{ pct }}%"></div>
+</div>
+{% endif %}
+
+{# Таблица расписания #}
+<div class="section">
+  <div class="card" style="padding:0;overflow:hidden">
+    {% if lectures %}
+    <table>
+      <thead>
+        <tr>
+          <th>Дата</th>
+          <th>Предмет</th>
+          {% if not student_record %}<th>Группа</th>{% endif %}
+          <th>Аудитория</th>
+          <th>Преподаватель</th>
+          <th>Статус</th>
+          {% if student_record %}<th>Моё посещение</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for lec in lectures %}
+        <tr>
+          <td>
+            <span class="mono">{{ lec.date.strftime('%d.%m.%Y') }}</span><br>
+            <span style="font-size:12px;color:var(--muted)">{{ lec.date.strftime('%H:%M') }}</span>
+          </td>
+          <td style="font-weight:600">{{ lec.subject.name }}</td>
+          {% if not student_record %}
+          <td><span class="pill pill-blue">{{ lec.group.name }}</span></td>
+          {% endif %}
+          <td class="mono">{{ lec.room or '—' }}</td>
+          <td style="font-size:13px;color:var(--muted)">
+            {{ lec.subject.teacher.full_name if lec.subject.teacher else '—' }}
+          </td>
+          <td>
+            {% if lec.is_open %}
+              <span class="pill pill-green">● идёт</span>
+            {% elif lec.date > now %}
+              <span class="pill pill-blue">предстоит</span>
+            {% else %}
+              <span class="pill pill-muted">завершена</span>
+            {% endif %}
+          </td>
+          {% if student_record %}
+          <td>
+            {% if lec.id in attendance_ids %}
+              <span class="pill pill-green">✓ был</span>
+            {% elif lec.date < now and not lec.is_open %}
+              <span class="pill pill-red">пропуск</span>
+            {% else %}
+              <span class="pill pill-muted">—</span>
+            {% endif %}
+          </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">Расписание пока не добавлено</div>
+    {% endif %}
+  </div>
+</div>
+
+{% endif %}
+{% endblock %}

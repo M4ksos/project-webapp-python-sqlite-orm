@@ -1,0 +1,152 @@
+{% extends 'base.html' %}
+{% block title %}{{ lecture.subject.name }} — SAS{% endblock %}
+{% block content %}
+
+<div class="page-header">
+  <div>
+    <h1>{{ lecture.subject.name }}</h1>
+    <div class="sub">
+      {{ lecture.group.name }} · {{ lecture.date.strftime('%d.%m.%Y %H:%M') }}
+      {% if lecture.room %} · ауд. {{ lecture.room }}{% endif %}
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <a href="{{ url_for('teacher_dashboard') }}" class="btn btn-ghost">← Назад</a>
+    <form method="POST" action="{{ url_for('toggle_lecture', lid=lecture.id) }}">
+      <button class="btn {{ 'btn-danger' if lecture.is_open else 'btn-success' }}">
+        {{ 'Закрыть регистрацию' if lecture.is_open else 'Открыть регистрацию' }}
+      </button>
+    </form>
+  </div>
+</div>
+
+{% set pct = ((present|length / total * 100)|int) if total > 0 else 0 %}
+{% if pct >= 70 %}{% set pct_color = 'var(--green)' %}{% set bar = 'green' %}
+{% elif pct >= 40 %}{% set pct_color = 'var(--amber)' %}{% set bar = '' %}
+{% else %}{% set pct_color = 'var(--red)' %}{% set bar = 'red' %}{% endif %}
+
+<div class="stat-grid section">
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--accent)">{{ total }}</div>
+    <div class="stat-label">В группе</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--green)">{{ present|length }}</div>
+    <div class="stat-label">Присутствуют</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:var(--red)">{{ absent|length }}</div>
+    <div class="stat-label">Отсутствуют</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val" style="color:{{ pct_color }}">{{ pct }}%</div>
+    <div class="stat-label">Посещаемость</div>
+  </div>
+</div>
+
+<div class="progress section" style="height:10px;border-radius:5px;margin-top:-20px">
+  <div class="progress-fill {{ bar }}" style="width:{{ pct }}%"></div>
+</div>
+
+<div class="two-col section">
+
+  <!-- Присутствуют -->
+  <div>
+    <div class="section-header">
+      <h2 style="color:var(--green)">✓ Присутствуют ({{ present|length }})</h2>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      {% if present %}
+      <table>
+        <thead>
+          <tr>
+            <th>Студент</th>
+            <th>Время</th>
+            <th>Тип</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in present %}
+          {% set rec = attendance_map[s.id] %}
+          <tr>
+            <td>
+              <div style="font-weight:600">{{ s.full_name }}</div>
+              <div class="mono" style="font-size:12px;color:var(--muted)">{{ s.student_number }}</div>
+            </td>
+            <td class="mono" style="font-size:13px">{{ rec.timestamp.strftime('%H:%M:%S') }}</td>
+            <td>
+              {% if rec.source == 'rfid' %}
+                <span class="pill pill-blue">RFID</span>
+              {% else %}
+                <span class="pill pill-amber">ручной</span>
+              {% endif %}
+            </td>
+            <td>
+              <form method="POST" action="{{ url_for('manual_attendance') }}">
+                <input type="hidden" name="lecture_id" value="{{ lecture.id }}">
+                <input type="hidden" name="student_id" value="{{ s.id }}">
+                <input type="hidden" name="action" value="remove">
+                <button class="btn btn-danger btn-sm" title="Убрать отметку">✕</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">Никто ещё не отметился</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Отсутствуют -->
+  <div>
+    <div class="section-header">
+      <h2 style="color:var(--red)">✕ Отсутствуют ({{ absent|length }})</h2>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      {% if absent %}
+      <table>
+        <thead>
+          <tr>
+            <th>Студент</th>
+            <th>Зачётка</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in absent %}
+          <tr>
+            <td style="font-weight:600">{{ s.full_name }}</td>
+            <td class="mono" style="font-size:13px;color:var(--muted)">{{ s.student_number }}</td>
+            <td>
+              <div style="display:flex;gap:6px">
+                <!-- Отметить присутствие вручную -->
+                <form method="POST" action="{{ url_for('manual_attendance') }}">
+                  <input type="hidden" name="lecture_id" value="{{ lecture.id }}">
+                  <input type="hidden" name="student_id" value="{{ s.id }}">
+                  <input type="hidden" name="action" value="add">
+                  <button class="btn btn-success btn-sm" title="Отметить присутствие">✓</button>
+                </form>
+                <!-- Поставить пропуск -->
+                <form method="POST" action="{{ url_for('manual_attendance') }}">
+                  <input type="hidden" name="lecture_id" value="{{ lecture.id }}">
+                  <input type="hidden" name="student_id" value="{{ s.id }}">
+                  <input type="hidden" name="action" value="absent">
+                  <button class="btn btn-danger btn-sm" title="Поставить пропуск">н/б</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty" style="color:var(--green)">Все студенты присутствуют 🎉</div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+{% endblock %}
