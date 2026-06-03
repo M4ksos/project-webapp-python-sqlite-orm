@@ -20,6 +20,10 @@
     </span>
     {% endif %}
   </button>
+  <!-- После кнопки Пользователи: -->
+  <button class="tab-btn" onclick="showTab('teachers')">
+    Преподаватели ({{ teachers|length }})
+  </button>
   <button class="tab-btn" onclick="showTab('students')">Студенты ({{ students|length }})</button>
   <button class="tab-btn" onclick="showTab('groups')">Группы ({{ groups|length }})</button>
   <button class="tab-btn" onclick="showTab('subjects')">Предметы ({{ subjects|length }})</button>
@@ -142,6 +146,86 @@
           {% endfor %}
         </tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+{# ══════════ TAB: ПРЕПОДАВАТЕЛИ ══════════ #}
+<div id="tab-teachers" class="tab-content" style="display:none">
+
+  <div class="section">
+    <div class="section-header"><h2>Добавить преподавателя</h2></div>
+    <div class="card">
+      <form method="POST" action="{{ url_for('add_teacher') }}">
+        <div class="form-row">
+          <div class="form-group">
+            <label>ФИО</label>
+            <input type="text" name="full_name"
+                   placeholder="Иванов Иван Иванович"
+                   required style="min-width:240px">
+          </div>
+          <div class="form-group">
+            <label>Логин</label>
+            <input type="text" name="username"
+                   placeholder="ivanov" required>
+          </div>
+          <div class="form-group">
+            <label>Пароль (мин. 6 символов)</label>
+            <input type="password" name="password"
+                   placeholder="••••••" required>
+          </div>
+          <button type="submit" class="btn btn-primary"
+                  style="align-self:flex-end">Добавить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="card" style="padding:0;overflow:hidden">
+      {% set teacher_list = teachers %}
+      {% if teacher_list %}
+      <table>
+        <thead>
+          <tr>
+            <th>ФИО</th>
+            <th>Логин</th>
+            <th>Предметов</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in teacher_list %}
+          <tr>
+            <td style="font-weight:600">{{ t.full_name }}</td>
+            <td class="mono">{{ t.username }}</td>
+            <td>
+              {% if t.subjects %}
+                {% for s in t.subjects %}
+                  <span class="pill pill-blue">{{ s.name }}</span>
+                {% endfor %}
+              {% else %}
+                <span style="color:var(--muted);font-size:13px">нет предметов</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if t.id != current_user.id %}
+              <form method="POST"
+                    action="{{ url_for('delete_teacher', tid=t.id) }}"
+                    onsubmit="return confirm('Удалить преподавателя {{ t.full_name }}?')">
+                <button class="btn btn-danger btn-sm">Удалить</button>
+              </form>
+              {% else %}
+                <span style="font-size:12px;color:var(--muted)">это вы</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">Преподавателей нет</div>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -407,6 +491,12 @@
               <a href="{{ url_for('lecture_detail', lecture_id=lec.id) }}" class="btn btn-ghost btn-sm">Детали</a>
               <form method="POST" action="{{ url_for('toggle_lecture', lid=lec.id) }}">
                 <button class="btn btn-ghost btn-sm">{{ 'Закрыть' if lec.is_open else 'Открыть' }}</button>
+              </form>
+            </td>
+                        <td>
+              <form method="POST" action="{{ url_for('delete_lecture', sid=lec.id) }}"
+                    onsubmit="return confirm('Удалить лекцию «{{ lec.subject.name }} — {{ lec.group.name }}»?')"
+                <button class="btn btn-danger btn-sm">Удалить</button>
               </form>
             </td>
           </tr>

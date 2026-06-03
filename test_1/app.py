@@ -12,6 +12,7 @@ from models import db, User, Student, Group, Subject, Lecture, Attendance
 
 app = Flask(__name__)
 app.config.from_object(Config)
+
 db.init_app(app)
 
 # ──────────────────────────────────────────
@@ -297,23 +298,18 @@ def toggle_lecture(lid):
 def student_schedule():
     now = datetime.now()
 
-    # ── Преподаватель ──
     if current_user.is_teacher():
-        # current_user.subjects — это предметы где teacher_id = current_user.id
         subject_ids = [s.id for s in current_user.subjects]
-        if subject_ids:
-            lectures = (Lecture.query
-                        .filter(Lecture.subject_id.in_(subject_ids))
-                        .order_by(Lecture.date.asc()).all())
-        else:
-            lectures = []
+        lectures = (Lecture.query
+                    .filter(Lecture.subject_id.in_(subject_ids))
+                    .order_by(Lecture.date.asc()).all()
+                    if subject_ids else [])
         return render_template('schedule.html',
                                schedule=group_by_weekday(lectures),
                                student_record=None,
                                attendance_ids=set(),
                                now=now)
 
-    # ── Администратор ──
     if current_user.is_admin():
         lectures = Lecture.query.order_by(Lecture.date.asc()).all()
         return render_template('schedule.html',
@@ -323,14 +319,21 @@ def student_schedule():
                                now=now)
 
     # ── Студент ──
+    # Ищем запись студента двумя способами — через backref и напрямую
     student_rec = getattr(current_user, 'student_record', None)
+
+    # Если backref не сработал — ищем напрямую по student_id
+    if student_rec is None and current_user.student_id:
+        from models import Student
+        student_rec = Student.query.get(current_user.student_id)
+
     if student_rec:
         lectures = (Lecture.query
                     .filter_by(group_id=student_rec.group_id)
                     .order_by(Lecture.date.asc()).all())
         attendance_ids = {a.lecture_id for a in student_rec.attendances}
     else:
-        lectures      = []
+        lectures       = []
         attendance_ids = set()
 
     return render_template('schedule.html',
@@ -624,72 +627,65 @@ def add_lecture():
     flash('Лекция создана', 'success')
     return redirect(url_for('admin_panel'))
 
-
-# ──────────────────────────────────────────
-#  REST API ДЛЯ ESP32
-# ──────────────────────────────────────────
-
-def require_esp_key(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if request.headers.get('X-ESP-Key', '') != app.config['ESP_API_KEY']:
-            return jsonify({'error': 'unauthorized'}), 401
-        return f(*args, **kwargs)
-    return decorated
-
-
-@app.route('/api/checkin', methods=['POST'])
-@require_esp_key
-def api_checkin():
-    data = request.get_json(silent=True)
-    if not data:
-        return jsonify({'error': 'invalid json'}), 400
-
-    rfid = data.get('rfid_uid', '').strip().upper()
-    room = data.get('room', '').strip()
-
-    student = Student.query.filter_by(rfid_uid=rfid, active=True).first()
-    if not student:
-        return jsonify({'status': 'unknown_card', 'rfid': rfid}), 404
-
-    lecture = (Lecture.query
-               .filter_by(group_id=student.group_id, is_open=True, room=room)
-               .order_by(Lecture.date.desc()).first())
-    if not lecture:
-        return jsonify({'status': 'no_open_lecture',
-                        'student': student.full_name}), 404
-
-    existing = Attendance.query.filter_by(
-        student_id=student.id, lecture_id=lecture.id).first()
-    if existing:
-        return jsonify({'status': 'already_checked',
-                        'student': student.full_name,
-                        'time': existing.timestamp.strftime('%H:%M')}), 200
-
-    record = Attendance(student_id=student.id,
-                        lecture_id=lecture.id, source='rfid')
-    db.session.add(record)
+@app.route('/admin/lecture/<int:sid>/delete')
+@login_required
+@admin_required
+def delete_lecture(sid):
+    lecture = Lecture.query.get_or_404(sid)
+    db.session.delete(lecture)
     db.session.commit()
+    flash(f'Предмет «{lecture.name}» удалён', 'info')
+    return redirect(url_for('admin_panel'))
 
-    return jsonify({'status': 'ok',
-                    'student': student.full_name,
-                    'group':   student.group.name,
-                    'subject': lecture.subject.name,
-                    'time':    record.timestamp.strftime('%H:%M')}), 200
+# --- Преподаватели ---
+
+# ── Преподаватели ──────────────────────────────────────────
+
+@app.route('/admin/teacher/add', methods=['POST'])
+@login_required
+@admin_required
+def add_teacher():
+    username  = request.form.get('username', '').strip()
+    full_name = request.form.get('full_name', '').strip()
+    password  = request.form.get('password', '')
+
+    if not all([username, full_name, password]):
+        flash('Заполните все поля', 'error')
+        return redirect(url_for('admin_panel'))
+    if len(password) < 6:
+        flash('Пароль должен быть не менее 6 символов', 'error')
+        return redirect(url_for('admin_panel'))
+    if User.query.filter_by(username=username).first():
+        flash(f'Логин «{username}» уже занят', 'error')
+        return redirect(url_for('admin_panel'))
+
+    teacher = User(username=username, full_name=full_name,
+                   role='teacher', approved=True)
+    teacher.set_password(password)
+    db.session.add(teacher)
+    db.session.commit()
+    flash(f'Преподаватель {full_name} добавлен', 'success')
+    return redirect(url_for('admin_panel'))
 
 
-@app.route('/api/status', methods=['GET'])
-@require_esp_key
-def api_status():
-    room = request.args.get('room', '')
-    lecture = (Lecture.query.filter_by(is_open=True, room=room)
-               .order_by(Lecture.date.desc()).first())
-    if lecture:
-        return jsonify({'open': True, 'subject': lecture.subject.name,
-                        'group': lecture.group.name,
-                        'date':  lecture.date.strftime('%d.%m.%Y %H:%M')})
-    return jsonify({'open': False})
-
+@app.route('/admin/teacher/<int:tid>/delete', methods=['POST'])
+@login_required
+@admin_required
+def delete_teacher(tid):
+    teacher = User.query.get_or_404(tid)
+    if teacher.role != 'teacher':
+        flash('Это не преподаватель', 'error')
+        return redirect(url_for('admin_panel'))
+    if teacher.id == current_user.id:
+        flash('Нельзя удалить себя', 'error')
+        return redirect(url_for('admin_panel'))
+    # Открепить предметы
+    for subj in teacher.subjects:
+        subj.teacher_id = None
+    db.session.delete(teacher)
+    db.session.commit()
+    flash(f'Преподаватель {teacher.full_name} удалён', 'info')
+    return redirect(url_for('admin_panel'))
 
 # ──────────────────────────────────────────
 #  ОБРАБОТЧИКИ ОШИБОК
@@ -720,8 +716,9 @@ def seed_database():
     if User.query.first():
         return
 
-    # --- Пользователи ---
+    from datetime import date, timedelta
 
+    # ── Пользователи ──────────────────────────────────────────
     admin = User(username='admin', full_name='Администратор',
                  role='admin', approved=True)
     admin.set_password('admin123')
@@ -733,8 +730,7 @@ def seed_database():
     db.session.add_all([admin, teacher])
     db.session.flush()
 
-    # --- Группы ---
-    
+    # ── Группы ────────────────────────────────────────────────
     g1 = Group(name='group-1')
     g2 = Group(name='group-2')
     g3 = Group(name='group-3')
@@ -742,59 +738,144 @@ def seed_database():
     db.session.add_all([g1, g2, g3, g4])
     db.session.flush()
 
-    # --- Предмет ---
+    groups = [g1, g2, g3, g4]
 
-    subj = Subject(name='Базы данных', teacher_id=teacher.id)
-    db.session.add(subj)
+    # ── Предметы (по два на группу, чтобы пары не были одинаковые) ──
+    subjects_data = [
+        'Базы данных',
+        'Математический анализ',
+        'Физика',
+        'Программирование',
+        'Операционные системы',
+        'Компьютерные сети',
+        'Теория алгоритмов',
+        'Английский язык',
+    ]
+    subject_objs = []
+    for name in subjects_data:
+        s = Subject(name=name, teacher_id=teacher.id)
+        db.session.add(s)
+        subject_objs.append(s)
     db.session.flush()
 
-    # --- Студенты ---
-    
+    # ── Студенты ──────────────────────────────────────────────
     students_data = [
-        ('AA:BB:CC:01', 'Алексеев Антон Игоревич',    '2021001', g1.id),
-        ('AA:BB:CC:02', 'Борисова Мария Сергеевна',   '2021002', g1.id),
-        ('AA:BB:CC:03', 'Васильев Дмитрий Олегович',  '2021003', g2.id),
-        ('AA:BB:CC:04', 'Григорьева Анна Павловна',   '2021004', g2.id),
-        ('AA:BB:DD:01', 'Денисов Илья Андреевич',     '2022001', g3.id),
-        ('AA:BB:DD:02', 'Егоров Кирилл Максимович',   '2022002', g3.id),
-        ('AA:BB:DD:03', 'Жукова Полина Вячеславовна', '2022003', g4.id),
-        ('AA:BB:DD:04', 'Жукова Полина Вячеславовна', '2022004', g4.id)
+        ('AA:BB:CC:01', 'Богданович Антон Игоревич',   '2021001', g1.id),
+        ('AA:BB:CC:02', 'Борисова Мария Сергеевна',    '2021002', g1.id),
+        ('AA:BB:CC:03', 'Васильев Дмитрий Олегович',   '2021003', g2.id),
+        ('AA:BB:CC:04', 'Придыбайло Артём Дмитриевич', '2021004', g2.id),
+        ('AA:BB:DD:01', 'Денисов Илья Андреевич',      '2022001', g3.id),
+        ('AA:BB:DD:02', 'Жукова Полина Вячеславовна',  '2022002', g3.id),
+        ('AA:BB:DD:03', 'Скобликов Евгений Петрович',  '2022003', g4.id),
+        ('AA:BB:DD:04', 'Степура Максим Алексеевич',   '2022004', g4.id),
     ]
     student_objs = []
     for rfid, name, num, gid in students_data:
-        s = Student(rfid_uid=rfid, full_name=name, student_number=num, group_id=gid)
+        s = Student(rfid_uid=rfid, full_name=name,
+                    student_number=num, group_id=gid)
         db.session.add(s)
         student_objs.append(s)
     db.session.flush()
 
-    # --- Студент-пользователь (привязан к первому студенту) ---
-    
-    stu_user = User(username='alekseev', full_name='Алексеев Антон Игоревич',
-                    role='student', approved=True, student_id=student_objs[0].id)
+    # ── Студент-пользователь ──────────────────────────────────
+    stu_user = User(username='skoblikov',
+                    full_name='Скобликов Евгений Петрович',
+                    role='student', approved=True)
     stu_user.set_password('student123')
     db.session.add(stu_user)
-
-    # --- Лекции ---
-    lec1 = Lecture(subject_id=subj.id, group_id=g1.id,
-                   date=datetime.now(), room='302', is_open=True)
-    lec2 = Lecture(subject_id=subj.id, group_id=g1.id,
-                   date=datetime(2025, 4, 28, 9, 0), room='302', is_open=False)
-    db.session.add_all([lec1, lec2])
     db.session.flush()
 
-    # --- Отметки ---
-    for s in student_objs[:3]:
-        db.session.add(Attendance(student_id=s.id,
-                                  lecture_id=lec1.id, source='rfid'))
-    # --- Пропуск у 4-го студента на прошлой лекции ---
-    db.session.add(Attendance(student_id=student_objs[3].id,
-                              lecture_id=lec2.id, source='absent'))
+    student_objs[6].user_id = stu_user.id
+    db.session.flush()
+    # ── Лекции: текущая неделя, пн–сб, 2 пары в день на группу ──
+    #
+    # Расписание пар:
+    #   Пара 1: 09:00 – 10:30
+    #   Пара 2: 10:40 – 12:10
+    #
+    # Предметы распределяются циклически по индексу
+    # чтобы в расписании не повторялся один предмет подряд.
+
+    today      = date.today()
+    monday     = today - timedelta(days=today.weekday())
+
+    pair_times = [
+        (9,  0),   # Пара 1 — 09:00
+        (10, 40),  # Пара 2 — 10:40
+    ]
+
+    # Аудитории для каждой группы
+    rooms = {
+        g1.id: '101',
+        g2.id: '202',
+        g3.id: '303',
+        g4.id: '404',
+    }
+
+    all_lectures = []
+    subj_index   = 0  # сквозной счётчик для смены предметов
+
+    for day_offset in range(6):           # 0=пн, 1=вт, ... 5=сб
+        lecture_date = monday + timedelta(days=day_offset)
+        is_today     = (lecture_date == today)
+
+        for group in groups:
+            for pair_num, (hour, minute) in enumerate(pair_times):
+                lec_datetime = datetime(
+                    lecture_date.year,
+                    lecture_date.month,
+                    lecture_date.day,
+                    hour,
+                    minute
+                )
+                subj = subject_objs[subj_index % len(subject_objs)]
+                subj_index += 1
+
+                # Лекции сегодняшнего дня — открыты для регистрации
+                # Прошедшие дни — закрыты
+                # Будущие дни — закрыты (ещё не началось)
+                is_open = is_today
+
+                lec = Lecture(
+                    subject_id = subj.id,
+                    group_id   = group.id,
+                    date       = lec_datetime,
+                    room       = rooms[group.id],
+                    is_open    = is_open,
+                )
+                db.session.add(lec)
+                all_lectures.append(lec)
+
+    db.session.flush()
+
+    # ── Отметки: на лекциях сегодняшнего дня отмечаем часть студентов ──
+    today_lectures = [
+        lec for lec in all_lectures
+        if lec.date.date() == today
+    ]
+
+    for lec in today_lectures:
+        # Берём студентов этой группы
+        group_students = [
+            s for s in student_objs if s.group_id == lec.group_id
+        ]
+        # Первый студент — присутствует, второй — пропуск
+        if len(group_students) >= 1:
+            db.session.add(Attendance(
+                student_id = group_students[0].id,
+                lecture_id = lec.id,
+                source     = 'manual'
+            ))
+        if len(group_students) >= 2:
+            db.session.add(Attendance(
+                student_id = group_students[1].id,
+                lecture_id = lec.id,
+                source     = 'absent'
+            ))
 
     db.session.commit()
-    print('✓ База данных заполнена тестовыми данными')
-    print('  admin / admin123')
-    print('  ivanov / teacher123  (преподаватель)')
-    print('  alekseev / student123  (студент)')
+
+    
 
 # ──────────────────────────────────────────
 #  запуск приложение
